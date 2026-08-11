@@ -1,6 +1,5 @@
 import { Injectable } from '@nestjs/common';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { z } from 'zod';
 import { crawlSiteSchema, onboardSiteSchema, removeSiteSchema } from '../common/schemas.js';
 import { WorkflowService } from '../workflow/workflow.service.js';
 

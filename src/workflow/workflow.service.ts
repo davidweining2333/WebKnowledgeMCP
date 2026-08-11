@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { CrawlerAgentService } from '../agents/crawler/crawler-agent.service.js';
 import { OnboardingAgentService } from '../agents/onboarding/onboarding-agent.service.js';
-import { CrawlRequest, KnowledgeDocument, SiteSummary } from '../common/types.js';
+import { CrawlRequest, KnowledgeDocument, SiteProfile, SiteSummary } from '../common/types.js';
 import { SiteRepository } from '../database/site.repository.js';
 
 @Injectable()
@@ -19,8 +19,11 @@ export class WorkflowService {
   }
 
   async crawlSite(request: CrawlRequest): Promise<{ documents: KnowledgeDocument[] }> {
-    const profile = await this.siteRepository.getProfile(request.site);
-    if (!profile) throw new NotFoundException(`Site not found: ${request.site}`);
+    const site = await this.siteRepository.findSiteByIdentifier(request.site);
+    const profileRecord = site?.profiles[0];
+    if (!site || !profileRecord) throw new NotFoundException(`Site not found: ${request.site}`);
+
+    const profile = JSON.parse(profileRecord.json) as SiteProfile;
     const documents = await this.crawlerAgent.collect(profile, request);
     return { documents };
   }

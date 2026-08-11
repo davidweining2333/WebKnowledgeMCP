@@ -2,13 +2,17 @@ import { Injectable } from '@nestjs/common';
 import axios from 'axios';
 import { CrawlRequest, KnowledgeDocument, SiteProfile } from '../../common/types.js';
 import { PlaywrightBrowserAdapter } from '../../browser/playwright-browser.adapter.js';
+import { DocxParserAdapter } from '../../parser/docx-parser.adapter.js';
 import { HtmlParserAdapter } from '../../parser/html-parser.adapter.js';
+import { PdfParserAdapter } from '../../parser/pdf-parser.adapter.js';
 
 @Injectable()
 export class CrawlerAgentService {
   constructor(
     private readonly browser: PlaywrightBrowserAdapter,
     private readonly htmlParser: HtmlParserAdapter,
+    private readonly pdfParser: PdfParserAdapter,
+    private readonly docxParser: DocxParserAdapter,
   ) {}
 
   async collect(profile: SiteProfile, request: CrawlRequest): Promise<KnowledgeDocument[]> {
@@ -41,12 +45,25 @@ export class CrawlerAgentService {
   }
 
   private async fetchDocument(url: string): Promise<KnowledgeDocument> {
-    const response = await axios.get<string>(url, {
+    const response = await axios.get<ArrayBuffer | string>(url, {
       timeout: 20000,
       headers: { 'User-Agent': 'Mozilla/5.0 (compatible; WebKnowledgeMCP/1.0)' },
-      responseType: 'text',
+      responseType: this.isBinaryDocument(url) ? 'arraybuffer' : 'text',
     });
-    return this.htmlParser.parse(response.data, url);
+
+    if (url.toLowerCase().endsWith('.pdf')) {
+      return this.pdfParser.parse(Buffer.from(response.data as ArrayBuffer), url);
+    }
+
+    if (/\.docx?$/i.test(url)) {
+      return this.docxParser.parse(Buffer.from(response.data as ArrayBuffer), url);
+    }
+
+    return this.htmlParser.parse(response.data as string, url);
+  }
+
+  private isBinaryDocument(url: string): boolean {
+    return /\.(pdf|docx?|pptx?|xlsx?)$/i.test(url);
   }
 
   private isInsideDateRange(document: KnowledgeDocument, from?: string, to?: string): boolean {
