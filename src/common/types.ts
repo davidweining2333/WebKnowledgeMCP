@@ -15,6 +15,14 @@ export interface KnowledgeDocument {
   attachments: Attachment[];
 }
 
+export type WorkflowParameter = 'query' | 'from' | 'to';
+
+export type SiteWorkflowAction =
+  | { type: 'click'; selector: string; label?: string }
+  | { type: 'fill'; selector: string; parameter: WorkflowParameter; label?: string; inputType?: string }
+  | { type: 'wait_for'; selector: string; timeout?: number }
+  | { type: 'wait_time'; ms: number };
+
 export interface SiteProfile {
   url: string;
   loginRequired: boolean;
@@ -24,6 +32,7 @@ export interface SiteProfile {
   nextPageSelector: string;
   attachmentSelector: string;
   workflowVersion: number;
+  workflowActions?: SiteWorkflowAction[];
   siteName: string;
   feedType: 'static' | 'interactive';
 }
@@ -37,6 +46,7 @@ export interface SiteSummary {
 
 export interface CrawlRequest {
   site: string;
+  query?: string;
   from?: string;
   to?: string;
   limit?: number;

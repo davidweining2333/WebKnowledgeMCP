@@ -17,7 +17,7 @@ export class McpToolsService {
 
     server.tool(
       'crawl_site',
-      'Collect structured documents from a configured website. Returns raw documents, not summaries.',
+      'Run the learned website workflow with optional query/from/to parameters, extract result pages and supported attachment text, and return raw documents for the calling agent to summarize.',
       crawlSiteSchema.shape,
       async (input) => this.asToolResult(await this.workflow.crawlSite(input)),
     );

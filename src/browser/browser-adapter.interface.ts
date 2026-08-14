@@ -1,10 +1,13 @@
-export interface BrowserAction {
-  type: 'click' | 'fill' | 'select' | 'wait_for' | 'wait_time' | 'scroll';
-  selector?: string;
-  value?: string;
-  ms?: number;
-  timeout?: number;
-  direction?: 'up' | 'down';
+export interface InteractiveControl {
+  selector: string;
+  label: string;
+  tag: string;
+}
+
+export interface InteractiveField {
+  selector: string;
+  label: string;
+  inputType: string;
 }
 
 export interface BrowserAdapter {
@@ -13,8 +16,11 @@ export interface BrowserAdapter {
   type(selector: string, value: string): Promise<void>;
   wait(selectorOrMs: string | number): Promise<void>;
   download(selector: string): Promise<string[]>;
+  fetchBuffer(url: string): Promise<Buffer>;
   content(): Promise<string>;
   currentUrl(): Promise<string>;
   links(selector: string): Promise<Array<{ title: string; url: string }>>;
+  interactiveControls(): Promise<InteractiveControl[]>;
+  interactiveFields(): Promise<InteractiveField[]>;
   close(): Promise<void>;
 }

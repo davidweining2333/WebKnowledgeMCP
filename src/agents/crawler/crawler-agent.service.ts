@@ -1,6 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import axios from 'axios';
-import { CrawlRequest, KnowledgeDocument, SiteProfile } from '../../common/types.js';
+import { CrawlRequest, KnowledgeDocument, SiteProfile, SiteWorkflowAction } from '../../common/types.js';
 import { PlaywrightBrowserAdapter } from '../../browser/playwright-browser.adapter.js';
 import { DocxParserAdapter } from '../../parser/docx-parser.adapter.js';
 import { HtmlParserAdapter } from '../../parser/html-parser.adapter.js';
@@ -17,11 +16,13 @@ export class CrawlerAgentService {
 
   async collect(profile: SiteProfile, request: CrawlRequest): Promise<KnowledgeDocument[]> {
     try {
-      const links = await this.collectLinks(profile, request.limit || 20);
+      const links = await this.collectLinks(profile, request, request.limit || 20);
       const documents: KnowledgeDocument[] = [];
       for (const link of links) {
         const document = await this.fetchDocument(link.url);
-        if (this.isInsideDateRange(document, request.from, request.to)) documents.push(document);
+        if (!this.isInsideDateRange(document, request.from, request.to)) continue;
+        await this.appendAttachmentContent(document);
+        documents.push(document);
       }
       return documents;
     } finally {
@@ -29,8 +30,13 @@ export class CrawlerAgentService {
     }
   }
 
-  private async collectLinks(profile: SiteProfile, limit: number): Promise<Array<{ title: string; url: string }>> {
+  private async collectLinks(
+    profile: SiteProfile,
+    request: CrawlRequest,
+    limit: number,
+  ): Promise<Array<{ title: string; url: string }>> {
     await this.browser.open(profile.url);
+    await this.replayWorkflow(profile.workflowActions || [], request);
     const selector = profile.articleSelector || 'a';
     const links = await this.browser.links(selector.includes('a') ? selector : `${selector} a`);
     const seen = new Set<string>();
@@ -44,30 +50,77 @@ export class CrawlerAgentService {
     return normalized;
   }
 
+  private async replayWorkflow(actions: SiteWorkflowAction[], request: CrawlRequest): Promise<void> {
+    for (const action of actions) {
+      if (action.type === 'fill') {
+        const value = this.workflowValue(action, request);
+        if (value) await this.browser.type(action.selector, value);
+        continue;
+      }
+      if (action.type === 'click') {
+        await this.browser.click(action.selector);
+        continue;
+      }
+      if (action.type === 'wait_time') {
+        await this.browser.wait(action.ms);
+        continue;
+      }
+      if (action.type === 'wait_for') {
+        await this.browser.wait(action.selector);
+      }
+    }
+  }
+
+  private workflowValue(
+    action: Extract<SiteWorkflowAction, { type: 'fill' }>,
+    request: CrawlRequest,
+  ): string | undefined {
+    const value = request[action.parameter];
+    if (!value || action.parameter === 'query') return value;
+    if (action.inputType === 'date') return new Date(value).toISOString().slice(0, 10);
+    const [year, month, day] = new Date(value).toISOString().slice(0, 10).split('-');
+    if (/dd[\s/-]*mm[\s/-]*yyyy/i.test(action.label || '')) return `${day}/${month}/${year}`;
+    if (/mm[\s/-]*dd[\s/-]*yyyy/i.test(action.label || '')) return `${month}/${day}/${year}`;
+    return `${year}-${month}-${day}`;
+  }
+
   private async fetchDocument(url: string): Promise<KnowledgeDocument> {
     if (!this.isBinaryDocument(url)) {
       await this.browser.open(url);
       return this.htmlParser.parse(await this.browser.content(), await this.browser.currentUrl());
     }
 
-    const response = await axios.get<ArrayBuffer>(url, {
-      timeout: 20000,
-      responseType: 'arraybuffer',
-    });
+    return this.parseBinaryDocument(await this.browser.fetchBuffer(url), url);
+  }
 
-    if (url.toLowerCase().endsWith('.pdf')) {
-      return this.pdfParser.parse(Buffer.from(response.data), url);
+  private async appendAttachmentContent(document: KnowledgeDocument): Promise<void> {
+    const extracted: string[] = [];
+    for (const attachment of document.attachments) {
+      if (!/\.(pdf|docx?)(?:$|[?#])/i.test(attachment.url)) continue;
+      try {
+        const parsed = await this.parseBinaryDocument(
+          await this.browser.fetchBuffer(attachment.url),
+          attachment.url,
+        );
+        if (parsed.content) extracted.push(`[Attachment: ${attachment.filename}]\n${parsed.content}`);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        extracted.push(`[Attachment: ${attachment.filename}] Extraction failed: ${message}`);
+      }
     }
-
-    if (/\.docx?$/i.test(url)) {
-      return this.docxParser.parse(Buffer.from(response.data), url);
+    if (extracted.length > 0) {
+      document.content = `${document.content}\n\n${extracted.join('\n\n')}`.trim();
     }
+  }
 
+  private async parseBinaryDocument(buffer: Buffer, url: string): Promise<KnowledgeDocument> {
+    if (/\.pdf(?:$|[?#])/i.test(url)) return this.pdfParser.parse(buffer, url);
+    if (/\.docx?(?:$|[?#])/i.test(url)) return this.docxParser.parse(buffer, url);
     throw new Error(`Unsupported binary document type: ${url}`);
   }
 
   private isBinaryDocument(url: string): boolean {
-    return /\.(pdf|docx?|pptx?|xlsx?)$/i.test(url);
+    return /\.(pdf|docx?|pptx?|xlsx?)(?:$|[?#])/i.test(url);
   }
 
   private isInsideDateRange(document: KnowledgeDocument, from?: string, to?: string): boolean {

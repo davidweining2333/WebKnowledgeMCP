@@ -6,6 +6,7 @@ export const onboardSiteSchema = z.object({
 
 export const crawlSiteSchema = z.object({
   site: z.string().min(1),
+  query: z.string().min(1).optional(),
   from: z.string().optional(),
   to: z.string().optional(),
   limit: z.number().int().positive().max(100).optional(),

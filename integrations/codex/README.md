@@ -160,15 +160,21 @@ args = ["D:/code/WebKnowledgeMCP/integrations/cherry-studio/launcher.mjs"]
 学习一个网站：
 
 ```text
-使用 web-knowledge-mcp 的 onboard_site，学习 https://example.com。
+使用 web-knowledge-mcp 的 onboard_site 学习 https://example.com。
+识别并保存网站的搜索入口、关键词字段、起止日期字段、提交按钮、结果列表、详情页和附件访问流程。
 如果网站要求登录或出现验证码，请停止并告诉我，不要尝试绕过验证。
 ```
 
-采集已经学习的网站：
+按自然语言需求执行已学习的查询并摘要：
 
 ```text
-使用 web-knowledge-mcp 的 crawl_site，采集 openai 最近一年发布的文档，最多返回 20 篇。
+使用 web-knowledge-mcp 查询已经学习的 ferc 网站：
+主题是 energy storage，时间范围是 2025-01-01 到 2025-06-30，最多 20 条。
+调用 crawl_site 时传入 site、query、from、to 和 limit。
+读取返回的网页正文以及 PDF/DOC/DOCX 附件文本，按主题归纳关键信息，给出中文摘要，并附来源 URL。
 ```
+
+这里由 Codex 把自然语言中的主题和日期解析为 MCP 参数；MCP 负责复放站点交互、抓取和解析，Codex 负责摘要、翻译与报告生成。
 
 删除配置：
 
@@ -180,8 +186,8 @@ args = ["D:/code/WebKnowledgeMCP/integrations/cherry-studio/launcher.mjs"]
 
 | 工具 | 用途 |
 |---|---|
-| `onboard_site` | 打开网站并学习站点结构，返回 `siteId` |
-| `crawl_site` | 按站点配置采集文档 |
+| `onboard_site` | 用 Playwright 探索网站并保存可复放的参数化查询工作流，返回 `siteId` |
+| `crawl_site` | 传入 `site/query/from/to/limit`，复放工作流并返回网页和附件正文 |
 | `list_sites` | 查看已经学习的网站 |
 | `remove_site` | 删除网站配置 |
 
