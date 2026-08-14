@@ -1,20 +1,16 @@
 import { Injectable } from '@nestjs/common';
-import axios from 'axios';
 import * as cheerio from 'cheerio';
+import { PlaywrightBrowserAdapter } from '../../browser/playwright-browser.adapter.js';
 import { SiteProfile } from '../../common/types.js';
-
-const USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36';
 
 @Injectable()
 export class OnboardingAgentService {
-  async learn(url: string): Promise<SiteProfile> {
-    const response = await axios.get<string>(url, {
-      timeout: 15000,
-      headers: { 'User-Agent': USER_AGENT },
-      responseType: 'text',
-    });
+  constructor(private readonly browser: PlaywrightBrowserAdapter) {}
 
-    const html = response.data;
+  async learn(url: string): Promise<SiteProfile> {
+    await this.browser.open(url);
+    const html = await this.browser.content();
+    this.assertNotBlocked(html, await this.browser.currentUrl());
     const $ = cheerio.load(html);
     const siteName = this.siteName($, url);
     const articleSelector = this.bestArticleSelector($);
@@ -71,6 +67,29 @@ export class OnboardingAgentService {
 
   private firstExistingSelector($: cheerio.CheerioAPI, selectors: string[]): string {
     return selectors.find((selector) => $(selector).length > 0) || '';
+  }
+
+  private assertNotBlocked(html: string, currentUrl: string): void {
+    const $ = cheerio.load(html);
+    const text = `${$('title').text()} ${$('body').text()}`.replace(/\s+/g, ' ').toLowerCase();
+    const challengeMarkers = [
+      'captcha',
+      'cloudflare ray id',
+      'checking your browser',
+      'verify you are human',
+      'access denied',
+      '访问验证',
+      '安全验证',
+      '请完成验证',
+      '访问过于频繁',
+    ];
+    if (challengeMarkers.some((marker) => text.includes(marker))) {
+      throw new Error(
+        `The site returned an anti-bot or verification page (${currentUrl}). ` +
+        'Set WEB_KNOWLEDGE_BROWSER_HEADLESS=false and WEB_KNOWLEDGE_BROWSER_PROFILE to a persistent directory, ' +
+        'restart the MCP server, complete any required verification in the opened browser, then retry.',
+      );
+    }
   }
 
   private interactiveScore($: cheerio.CheerioAPI, html: string): number {

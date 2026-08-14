@@ -45,21 +45,25 @@ export class CrawlerAgentService {
   }
 
   private async fetchDocument(url: string): Promise<KnowledgeDocument> {
-    const response = await axios.get<ArrayBuffer | string>(url, {
+    if (!this.isBinaryDocument(url)) {
+      await this.browser.open(url);
+      return this.htmlParser.parse(await this.browser.content(), await this.browser.currentUrl());
+    }
+
+    const response = await axios.get<ArrayBuffer>(url, {
       timeout: 20000,
-      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; WebKnowledgeMCP/1.0)' },
-      responseType: this.isBinaryDocument(url) ? 'arraybuffer' : 'text',
+      responseType: 'arraybuffer',
     });
 
     if (url.toLowerCase().endsWith('.pdf')) {
-      return this.pdfParser.parse(Buffer.from(response.data as ArrayBuffer), url);
+      return this.pdfParser.parse(Buffer.from(response.data), url);
     }
 
     if (/\.docx?$/i.test(url)) {
-      return this.docxParser.parse(Buffer.from(response.data as ArrayBuffer), url);
+      return this.docxParser.parse(Buffer.from(response.data), url);
     }
 
-    return this.htmlParser.parse(response.data as string, url);
+    throw new Error(`Unsupported binary document type: ${url}`);
   }
 
   private isBinaryDocument(url: string): boolean {

@@ -1,8 +1,6 @@
 import { Injectable } from '@nestjs/common';
-import { Browser, BrowserContext, chromium, Page } from 'playwright';
+import { Browser, BrowserContext, BrowserContextOptions, chromium, Page } from 'playwright';
 import { BrowserAdapter } from './browser-adapter.interface.js';
-
-const USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36';
 
 @Injectable()
 export class PlaywrightBrowserAdapter implements BrowserAdapter {
@@ -12,7 +10,10 @@ export class PlaywrightBrowserAdapter implements BrowserAdapter {
 
   async open(url: string): Promise<void> {
     await this.ensurePage();
-    await this.page?.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    const response = await this.page?.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    if (response && response.status() >= 400) {
+      throw new Error(`Website returned HTTP ${response.status()} for ${url}`);
+    }
     await this.page?.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => undefined);
   }
 
@@ -74,14 +75,28 @@ export class PlaywrightBrowserAdapter implements BrowserAdapter {
   }
 
   private async ensurePage(): Promise<void> {
-    if (!this.browser) {
-      this.browser = await chromium.launch({ headless: true });
-    }
     if (!this.context) {
-      this.context = await this.browser.newContext({ userAgent: USER_AGENT });
+      const headless = process.env.WEB_KNOWLEDGE_BROWSER_HEADLESS !== 'false';
+      const userDataDir = process.env.WEB_KNOWLEDGE_BROWSER_PROFILE?.trim();
+      const contextOptions: BrowserContextOptions = {
+        locale: process.env.WEB_KNOWLEDGE_BROWSER_LOCALE || 'zh-CN',
+        viewport: { width: 1440, height: 900 },
+      };
+      const userAgent = process.env.WEB_KNOWLEDGE_BROWSER_USER_AGENT?.trim();
+      if (userAgent) contextOptions.userAgent = userAgent;
+
+      if (userDataDir) {
+        this.context = await chromium.launchPersistentContext(userDataDir, {
+          ...contextOptions,
+          headless,
+        });
+      } else {
+        this.browser = await chromium.launch({ headless });
+        this.context = await this.browser.newContext(contextOptions);
+      }
     }
     if (!this.page) {
-      this.page = await this.context.newPage();
+      this.page = this.context.pages()[0] || await this.context.newPage();
     }
   }
 

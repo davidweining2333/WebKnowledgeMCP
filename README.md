@@ -1,5 +1,7 @@
 # Web Knowledge MCP
 
+> Codex 接入指南：见 [Codex 集成文档](file:integrations/codex/README.md)。
+
 A lightweight MCP server for acquiring structured knowledge from websites.
 
 The goal of this project is **not** to build another crawler.
