@@ -15,14 +15,23 @@ export class PlaywrightBrowserAdapter implements BrowserAdapter {
   async open(url: string): Promise<void> {
     await this.ensurePage();
     const page = this.requirePage();
+    const timeout = this.navigationTimeoutMs();
 
     // Some protected sites return an initial 403/challenge response and then let
     // browser-side JavaScript, cookies, or redirects complete the real navigation.
-    // Do not abort solely on the first response status; inspect the settled page
-    // in the onboarding layer instead.
-    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    // A navigation timeout is recoverable only when the browser already reached the
+    // requested origin and rendered a useful DOM; otherwise preserve the real error.
+    try {
+      await page.goto(url, { waitUntil: 'domcontentloaded', timeout });
+    } catch (error) {
+      const reachedTargetOrigin = this.sameOrigin(page.url(), url);
+      const hasUsefulDom = reachedTargetOrigin && await page.locator('body').innerText({ timeout: 1000 })
+        .then((text) => text.trim().length >= 80)
+        .catch(() => false);
+      if (!hasUsefulDom) throw error;
+    }
     await page.waitForTimeout(this.navigationSettleMs());
-    await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => undefined);
+    await page.waitForLoadState('networkidle', { timeout: Math.min(5000, timeout) }).catch(() => undefined);
   }
 
   async click(selector: string): Promise<void> {
@@ -74,11 +83,17 @@ export class PlaywrightBrowserAdapter implements BrowserAdapter {
     return page.$$eval(selector, (elements) => {
       const records: Array<{ title: string; url: string }> = [];
       for (const element of elements) {
-        const link = element.tagName.toLowerCase() === 'a' ? element as HTMLAnchorElement : element.querySelector('a');
-        const title = (link?.textContent || element.textContent || '').trim().replace(/\s+/g, ' ');
-        const href = link?.getAttribute('href') || '';
-        if (!href || href === '#' || href.startsWith('javascript:') || title.length < 10) continue;
-        records.push({ title, url: new URL(href, document.baseURI).href });
+        const links = element.tagName.toLowerCase() === 'a'
+          ? [element as HTMLAnchorElement]
+          : Array.from(element.querySelectorAll<HTMLAnchorElement>('a[href]'));
+        for (const link of links) {
+          const title = (link.textContent || link.getAttribute('title') || element.textContent || '')
+            .trim()
+            .replace(/\s+/g, ' ');
+          const href = link.getAttribute('href') || '';
+          if (!href || href === '#' || href.startsWith('javascript:') || title.length < 2) continue;
+          records.push({ title, url: new URL(href, document.baseURI).href });
+        }
       }
       return records;
     });
@@ -204,6 +219,7 @@ export class PlaywrightBrowserAdapter implements BrowserAdapter {
   }
 
   private async ensurePage(): Promise<void> {
+    this.resetClosedHandles();
     if (!this.context) {
       const headless = process.env.WEB_KNOWLEDGE_BROWSER_HEADLESS !== 'false';
       const userDataDir = process.env.WEB_KNOWLEDGE_BROWSER_PROFILE?.trim();
@@ -232,9 +248,40 @@ export class PlaywrightBrowserAdapter implements BrowserAdapter {
     }
   }
 
+  private resetClosedHandles(): void {
+    if (this.page?.isClosed()) this.page = null;
+    if (this.browser && !this.browser.isConnected()) {
+      this.page = null;
+      this.context = null;
+      this.browser = null;
+      return;
+    }
+    if (!this.context) return;
+    try {
+      this.context.pages();
+    } catch {
+      this.page = null;
+      this.context = null;
+      this.browser = null;
+    }
+  }
+
   private navigationSettleMs(): number {
     const configured = Number(process.env.WEB_KNOWLEDGE_BROWSER_SETTLE_MS || 3000);
     return Number.isFinite(configured) && configured >= 0 ? configured : 3000;
+  }
+
+  private navigationTimeoutMs(): number {
+    const configured = Number(process.env.WEB_KNOWLEDGE_BROWSER_NAVIGATION_TIMEOUT_MS || 30000);
+    return Number.isFinite(configured) && configured >= 5000 ? configured : 30000;
+  }
+
+  private sameOrigin(currentUrl: string, requestedUrl: string): boolean {
+    try {
+      return new URL(currentUrl).origin === new URL(requestedUrl).origin;
+    } catch {
+      return false;
+    }
   }
 
   private requirePage(): Page {

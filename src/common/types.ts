@@ -35,6 +35,7 @@ export interface SiteProfile {
   workflowActions?: SiteWorkflowAction[];
   siteName: string;
   feedType: 'static' | 'interactive';
+  pageType?: 'content' | 'listing';
 }
 
 export interface SiteSummary {

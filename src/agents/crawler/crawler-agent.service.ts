@@ -15,19 +15,26 @@ export class CrawlerAgentService {
   ) {}
 
   async collect(profile: SiteProfile, request: CrawlRequest): Promise<KnowledgeDocument[]> {
-    try {
-      const links = await this.collectLinks(profile, request, request.limit || 20);
-      const documents: KnowledgeDocument[] = [];
-      for (const link of links) {
-        const document = await this.fetchDocument(link.url);
-        if (!this.isInsideDateRange(document, request.from, request.to)) continue;
-        await this.appendAttachmentContent(document);
-        documents.push(document);
-      }
-      return documents;
-    } finally {
-      await this.browser.close();
+    if (profile.pageType === 'content') {
+      await this.browser.open(profile.url);
+      const document = await this.htmlParser.parse(await this.browser.content(), await this.browser.currentUrl());
+      if (!this.isInsideDateRange(document, request.from, request.to)) return [];
+      await this.appendAttachmentContent(document);
+      return [document];
     }
+
+    const links = await this.collectLinks(profile, request, request.limit || 20);
+    const targets = links.length > 0
+      ? links
+      : [{ title: profile.siteName, url: await this.browser.currentUrl() || profile.url }];
+    const documents: KnowledgeDocument[] = [];
+    for (const link of targets) {
+      const document = await this.fetchDocument(link.url);
+      if (!this.isInsideDateRange(document, request.from, request.to)) continue;
+      await this.appendAttachmentContent(document);
+      documents.push(document);
+    }
+    return documents;
   }
 
   private async collectLinks(
@@ -38,7 +45,7 @@ export class CrawlerAgentService {
     await this.browser.open(profile.url);
     await this.replayWorkflow(profile.workflowActions || [], request);
     const selector = profile.articleSelector || 'a';
-    const links = await this.browser.links(selector.includes('a') ? selector : `${selector} a`);
+    const links = await this.browser.links(selector);
     const seen = new Set<string>();
     const normalized: Array<{ title: string; url: string }> = [];
     for (const link of links) {

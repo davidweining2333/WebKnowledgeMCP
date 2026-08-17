@@ -13,7 +13,9 @@ export class OnboardingAgentService {
     let html = await this.browser.content();
     this.assertNotBlocked(html, await this.browser.currentUrl());
 
-    const workflowActions = await this.exploreWorkflow(html);
+    const initialPage = cheerio.load(html);
+    const pageType = this.isContentPage(initialPage) ? 'content' : 'listing';
+    const workflowActions = pageType === 'content' ? [] : await this.exploreWorkflow(html);
     html = await this.browser.content();
     this.assertNotBlocked(html, await this.browser.currentUrl());
 
@@ -34,6 +36,7 @@ export class OnboardingAgentService {
       workflowActions,
       siteName,
       feedType: workflowActions.length > 0 || interactiveScore >= 0.6 && !articleSelector ? 'interactive' : 'static',
+      pageType,
     };
   }
 
@@ -129,6 +132,20 @@ export class OnboardingAgentService {
       }))
       .filter(({ score }) => score > 0)
       .sort((left, right) => right.score - left.score)[0]?.control;
+  }
+
+  private isContentPage($: cheerio.CheerioAPI): boolean {
+    const declaredType = $('meta[property="og:type"]').attr('content')?.toLowerCase();
+    if (declaredType === 'article') return true;
+    if ($('meta[property="article:published_time"], meta[name="author"], [itemprop="articleBody"]').length > 0) return true;
+
+    const articleText = $('article').first().text().trim().replace(/\s+/g, ' ');
+    if (articleText.length >= 500 && $('article h1, article h2').length > 0) return true;
+
+    const mainText = $('main').first().text().trim().replace(/\s+/g, ' ');
+    const hasSingleHeading = $('main h1').length === 1 || $('body h1').length === 1;
+    const hasArticleSignals = $('main article, main [itemprop="articleBody"], time, [class*="author"], [class*="publish"]').length > 0;
+    return mainText.length >= 1500 && hasSingleHeading && hasArticleSignals;
   }
 
   private siteName($: cheerio.CheerioAPI, url: string): string {
