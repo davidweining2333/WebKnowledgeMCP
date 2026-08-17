@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import * as cheerio from 'cheerio';
 import { PlaywrightBrowserAdapter } from '../../browser/playwright-browser.adapter.js';
+import { BrowserDiagnostics } from '../../common/types.js';
 import { SiteProfile, SiteWorkflowAction, WorkflowParameter } from '../../common/types.js';
 import { InteractiveControl, InteractiveField } from '../../browser/browser-adapter.interface.js';
 
@@ -9,7 +10,11 @@ export class OnboardingAgentService {
   constructor(private readonly browser: PlaywrightBrowserAdapter) {}
 
   async learn(url: string): Promise<SiteProfile> {
-    await this.browser.open(url);
+    try {
+      await this.browser.open(url);
+    } catch (error) {
+      throw await this.diagnosticError(url, error);
+    }
     let html = await this.browser.content();
     this.assertNotBlocked(html, await this.browser.currentUrl());
 
@@ -202,24 +207,51 @@ export class OnboardingAgentService {
   private assertNotBlocked(html: string, currentUrl: string): void {
     const $ = cheerio.load(html);
     const text = `${$('title').text()} ${$('body').text()}`.replace(/\s+/g, ' ').toLowerCase();
-    const challengeMarkers = [
-      'captcha',
-      'cloudflare ray id',
-      'checking your browser',
-      'verify you are human',
-      'access denied',
-      '访问验证',
-      '安全验证',
-      '请完成验证',
-      '访问过于频繁',
+    const markers: Array<[string, string]> = [
+      ['captcha', '页面要求 CAPTCHA 验证'],
+      ['cloudflare ray id', '检测到 Cloudflare 验证页'],
+      ['checking your browser', '页面正在检查浏览器'],
+      ['verify you are human', '页面要求确认是真人'],
+      ['access denied', '服务器返回 Access Denied'],
+      ['too many requests', '请求过于频繁（Too Many Requests）'],
+      ['访问验证', '页面要求访问验证'],
+      ['安全验证', '页面要求安全验证'],
+      ['请完成验证', '页面要求完成验证'],
+      ['访问过于频繁', '页面提示访问过于频繁'],
     ];
-    if (challengeMarkers.some((marker) => text.includes(marker))) {
-      throw new Error(
-        `The site returned an anti-bot or verification page (${currentUrl}). ` +
-        'Set WEB_KNOWLEDGE_BROWSER_HEADLESS=false and WEB_KNOWLEDGE_BROWSER_PROFILE to a persistent directory, ' +
-        'restart the MCP server, complete any required verification in the opened browser, then retry.',
-      );
+    const match = markers.find(([marker]) => text.includes(marker));
+    if (match) {
+      throw new OnboardingBlockedError({
+        reason: match[1],
+        url: currentUrl,
+        status: null,
+        title: $('title').text().trim(),
+        bodyPreview: $('body').text().trim().replace(/\s+/g, ' ').slice(0, 500),
+      });
     }
+  }
+
+  private async diagnosticError(url: string, error: unknown): Promise<OnboardingBlockedError> {
+    const diagnostics = await this.browser.diagnostics().catch((): BrowserDiagnostics => ({
+      url,
+      title: '',
+      status: null,
+      bodyPreview: '',
+    }));
+    const message = error instanceof Error ? error.message : String(error);
+    const reason = diagnostics.status === 403
+      ? '服务器返回 HTTP 403（禁止访问）'
+      : diagnostics.status === 429
+        ? '服务器返回 HTTP 429（请求过于频繁）'
+        : message.toLowerCase().includes('timeout')
+          ? '页面导航超时，可能是网络不可达、挑战页未完成或站点响应过慢'
+          : '浏览器导航失败，页面未能正常打开';
+    return new OnboardingBlockedError({
+      ...diagnostics,
+      url: diagnostics.url || url,
+      reason,
+      navigationError: message,
+    });
   }
 
   private interactiveScore($: cheerio.CheerioAPI, html: string): number {
@@ -230,5 +262,12 @@ export class OnboardingAgentService {
     if ($('form').length > 0 && $('input, select, textarea').length > 0) score += 0.2;
     if ($('noscript').text().toLowerCase().includes('javascript')) score += 0.15;
     return Math.min(score, 1);
+  }
+}
+
+export class OnboardingBlockedError extends Error {
+  constructor(public readonly diagnostics: BrowserDiagnostics & { reason: string }) {
+    super(`onboard_site 被拦截：${diagnostics.reason}；URL=${diagnostics.url}；HTTP=${diagnostics.status ?? 'unknown'}；标题=${diagnostics.title || 'unknown'}；页面摘要=${diagnostics.bodyPreview || 'empty'}${diagnostics.navigationError ? `；导航错误=${diagnostics.navigationError}` : ''}`);
+    this.name = 'OnboardingBlockedError';
   }
 }

@@ -17,6 +17,14 @@ export interface KnowledgeDocument {
 
 export type WorkflowParameter = 'query' | 'from' | 'to';
 
+export interface BrowserDiagnostics {
+  url: string;
+  title: string;
+  status: number | null;
+  bodyPreview: string;
+  navigationError?: string;
+}
+
 export type SiteWorkflowAction =
   | { type: 'click'; selector: string; label?: string }
   | { type: 'fill'; selector: string; parameter: WorkflowParameter; label?: string; inputType?: string }

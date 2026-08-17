@@ -14,6 +14,10 @@ The goal is to allow any MCP-compatible AI (Claude, Codex, Cherry Studio, ChatGP
 
 - Website onboarding
 - Interactive website learning
+- Parameterized query workflow replay
+- Structured anti-bot / navigation diagnostics
+- Natural-language-friendly tool aliases
+- Next-step suggestions after every tool result
 - Login support
 - Browser automation
 - PDF / DOCX parsing
@@ -57,7 +61,9 @@ This project is NOT responsible for:
 - Translation
 - Report generation
 
-Those responsibilities belong to the LLM.
+Those responsibilities belong to the LLM. The MCP returns source documents and explicit next-step suggestions so the client can continue with summarization, translation, deduplication, or report generation.
+
+Tool selection is driven by tool descriptions and aliases: users can say “学习这个网站”“搜索这个网站最近的新闻”“提取并总结这些 PDF”，without first saying the MCP name or exact tool name. The final decision to call a tool remains with the MCP client/AI model.
 
 This project is only responsible for acquiring structured knowledge.
 

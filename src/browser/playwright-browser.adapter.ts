@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { Browser, BrowserContext, BrowserContextOptions, chromium, Page } from 'playwright';
+import { BrowserDiagnostics } from '../common/types.js';
 import { BrowserAdapter, InteractiveControl, InteractiveField } from './browser-adapter.interface.js';
 
 const DEFAULT_USER_AGENT =
@@ -11,6 +12,8 @@ export class PlaywrightBrowserAdapter implements BrowserAdapter {
   private browser: Browser | null = null;
   private context: BrowserContext | null = null;
   private page: Page | null = null;
+  private lastStatus: number | null = null;
+  private lastNavigationError: string | undefined;
 
   async open(url: string): Promise<void> {
     await this.ensurePage();
@@ -21,9 +24,14 @@ export class PlaywrightBrowserAdapter implements BrowserAdapter {
     // browser-side JavaScript, cookies, or redirects complete the real navigation.
     // A navigation timeout is recoverable only when the browser already reached the
     // requested origin and rendered a useful DOM; otherwise preserve the real error.
+    this.lastStatus = null;
+    this.lastNavigationError = undefined;
     try {
-      await page.goto(url, { waitUntil: 'domcontentloaded', timeout });
+      const response = await page.goto(url, { waitUntil: 'domcontentloaded', timeout });
+      this.lastStatus = response?.status() ?? null;
     } catch (error) {
+      this.lastNavigationError = error instanceof Error ? error.message : String(error);
+      this.lastStatus = null;
       const reachedTargetOrigin = this.sameOrigin(page.url(), url);
       const hasUsefulDom = reachedTargetOrigin && await page.locator('body').innerText({ timeout: 1000 })
         .then((text) => text.trim().length >= 80)
@@ -76,6 +84,17 @@ export class PlaywrightBrowserAdapter implements BrowserAdapter {
 
   async currentUrl(): Promise<string> {
     return this.requirePage().url();
+  }
+
+  async diagnostics(): Promise<BrowserDiagnostics> {
+    const page = this.requirePage();
+    return {
+      url: page.url(),
+      title: await page.title().catch(() => ''),
+      status: this.lastStatus,
+      bodyPreview: (await page.locator('body').innerText().catch(() => '')).trim().replace(/\\s+/g, ' ').slice(0, 500),
+      navigationError: this.lastNavigationError,
+    };
   }
 
   async links(selector: string): Promise<Array<{ title: string; url: string }>> {

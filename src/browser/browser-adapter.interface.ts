@@ -1,3 +1,5 @@
+import { BrowserDiagnostics } from '../common/types.js';
+
 export interface InteractiveControl {
   selector: string;
   label: string;
@@ -19,6 +21,7 @@ export interface BrowserAdapter {
   fetchBuffer(url: string): Promise<Buffer>;
   content(): Promise<string>;
   currentUrl(): Promise<string>;
+  diagnostics(): Promise<BrowserDiagnostics>;
   links(selector: string): Promise<Array<{ title: string; url: string }>>;
   interactiveControls(): Promise<InteractiveControl[]>;
   interactiveFields(): Promise<InteractiveField[]>;
